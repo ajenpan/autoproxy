@@ -1,8 +1,11 @@
 module autoproxy
 
-go 1.20
+go 1.19
 
-require github.com/henson/proxypool v0.0.0-20230226020630-1091cce053fe
+require (
+	github.com/henson/proxypool v0.0.0-20230226020630-1091cce053fe
+	github.com/sirupsen/logrus v1.9.0
+)
 
 require (
 	github.com/Aiicy/htmlquery v1.0.0 // indirect
