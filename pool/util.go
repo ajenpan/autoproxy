@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
-
-	"autoproxy/pool/crawl"
 )
 
 func ListHealth2(addrs []*ProxyAddr) []*ProxyAddr {
@@ -121,43 +119,43 @@ func ListHealth(rows []*AddrModel) []*AddrModel {
 	return ret
 }
 
-func UpdateSourceWithCrawler() {
-	var err error
-	crawlResult := crawl.RunAllCrawlers()
-	cache := make(map[string]struct{})
+// func UpdateSourceWithCrawler() {
+// 	var err error
+// 	crawlResult := crawl.RunAllCrawlers()
+// 	cache := make(map[string]struct{})
 
-	rows := []*AddrModel{}
+// 	rows := []*AddrModel{}
 
-	for _, item := range crawlResult {
-		if item.Err != nil {
-			fmt.Printf("crawl: %s error:%v \n", item.CrawlerName, item.Err)
-			continue
-		}
-		for _, addrstr := range item.Addrs {
-			if _, ok := cache[addrstr]; ok {
-				continue
-			}
-			cache[addrstr] = struct{}{}
-			rows = append(rows, &AddrModel{
-				Addr: addrstr,
-			})
-		}
-	}
+// 	for _, item := range crawlResult {
+// 		if item.Err != nil {
+// 			fmt.Printf("crawl: %s error:%v \n", item.CrawlerName, item.Err)
+// 			continue
+// 		}
+// 		for _, addrstr := range item.Addrs {
+// 			if _, ok := cache[addrstr]; ok {
+// 				continue
+// 			}
+// 			cache[addrstr] = struct{}{}
+// 			rows = append(rows, &AddrModel{
+// 				Addr: addrstr,
+// 			})
+// 		}
+// 	}
 
-	rows = ListHealth(rows)
+// 	rows = ListHealth(rows)
 
-	// store
-	store := &FileStorager{
-		FileName: "proxies.json",
-	}
+// 	// store
+// 	store := &FileStorager{
+// 		FileName: "proxies.json",
+// 	}
 
-	oldrows, _ := store.Read()
-	if len(oldrows) > 0 {
-		rows = append(rows, oldrows...)
-	}
+// 	oldrows, _ := store.Read()
+// 	if len(oldrows) > 0 {
+// 		rows = append(rows, oldrows...)
+// 	}
 
-	err = store.Save(rows)
-	if err != nil {
-		fmt.Println(err)
-	}
-}
+// 	err = store.Save(rows)
+// 	if err != nil {
+// 		fmt.Println(err)
+// 	}
+// }
