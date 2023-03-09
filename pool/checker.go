@@ -64,7 +64,7 @@ func (c *Checker) HealthCheck(addr *ProxyAddr) (*CheckReport, error) {
 	}
 
 	report := &CheckReport{
-		Addr : addr,
+		Addr:       addr,
 		Cost:       time.Since(startAt),
 		RespCode:   resp.StatusCode,
 		RespBody:   respRaw,
@@ -72,89 +72,3 @@ func (c *Checker) HealthCheck(addr *ProxyAddr) (*CheckReport, error) {
 	}
 	return report, nil
 }
-
-// func ListCheck(rows ) []*AddrModel { ) {
-// 	raw, err := os.ReadFile("proxy.json")
-
-// 	if err != nil {
-// 		return
-// 	}
-
-// 	rows := make([]map[string]interface{}, 0)
-// 	err = json.Unmarshal(raw, &rows)
-// 	if err != nil {
-// 		t.Error(err)
-// 	}
-
-// 	models := []*AddrModel{}
-
-// 	type reporter struct {
-// 		proxyAddr *ProxyAddr
-// 		report    *CheckReport
-// 		err       error
-// 	}
-
-// 	que := make(chan *reporter, len(rows))
-// 	wg := &sync.WaitGroup{}
-
-// 	for _, row := range rows {
-// 		schema := row["schema"].(string)
-// 		proxy := row["proxy"].(string)
-
-// 		addrstr := strings.ToLower(schema) + "://" + proxy
-// 		addr := NewProxyAddr(addrstr)
-// 		if err != nil {
-// 			continue
-// 		}
-
-// 		wg.Add(1)
-// 		go func(addr *ProxyAddr) {
-// 			defer wg.Done()
-
-// 			checker := &Checker{
-// 				TargetUrl: "https://www.baidu.com",
-// 			}
-// 			report, err := checker.HealthCheck(addr)
-// 			que <- &reporter{
-// 				proxyAddr: addr,
-// 				report:    report,
-// 				err:       err,
-// 			}
-// 		}(addr)
-// 	}
-// 	wg.Wait()
-
-// 	close(que)
-
-// 	for r := range que {
-// 		if r.err != nil {
-// 			fmt.Println(r.err, r.proxyAddr)
-// 			continue
-// 		}
-
-// 		report := r.report
-// 		condi := (report != nil && report.RespCode == 200)
-// 		if !condi {
-// 			fmt.Println("report code:", report.RespCode)
-// 			continue
-// 		}
-
-// 		header, _ := json.Marshal(r.proxyAddr.Header)
-// 		models = append(models, &AddrModel{
-// 			Addr:   r.proxyAddr.Address(),
-// 			Header: header,
-// 			Health: 1,
-// 			Speed:  r.report.Cost.Milliseconds(),
-// 		})
-// 	}
-
-// 	store := &FileStorager{
-// 		FileName: "proxies.json",
-// 	}
-
-// 	err = store.Save(models)
-
-// 	if err != nil {
-// 		t.Error(err)
-// 	}
-// }

@@ -4,6 +4,7 @@ go 1.19
 
 require (
 	github.com/henson/proxypool v0.0.0-20230226020630-1091cce053fe
+	github.com/robfig/cron/v3 v3.0.1
 	github.com/sirupsen/logrus v1.9.0
 )
 

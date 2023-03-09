@@ -8,11 +8,62 @@ import (
 	"autoproxy/pool/crawl"
 )
 
+func ListHealth2(addrs []*ProxyAddr) []*ProxyAddr {
+	targetUrl := "https://httpbin.org/get"
+
+	type reporter struct {
+		report *CheckReport
+		err    error
+		addr   *ProxyAddr
+	}
+
+	que := make(chan *reporter, len(addrs))
+	wg := &sync.WaitGroup{}
+	for _, addr := range addrs {
+		wg.Add(1)
+		go func(addr *ProxyAddr) {
+			defer wg.Done()
+
+			checker := &Checker{
+				TargetUrl: targetUrl,
+			}
+			report, err := checker.HealthCheck(addr)
+			que <- &reporter{
+				addr:   addr,
+				report: report,
+				err:    err,
+			}
+		}(addr)
+	}
+	wg.Wait()
+	close(que)
+
+	ret := make([]*ProxyAddr, 0, len(addrs))
+
+	for r := range que {
+		if r.err != nil {
+			fmt.Println(r.addr.Address(), r.err)
+			continue
+		}
+		if r.report == nil {
+			continue
+		}
+		report := r.report
+		condi := (report != nil && report.RespCode == 200)
+		if !condi {
+			continue
+		}
+		ret = append(ret, r.addr)
+	}
+	return ret
+}
+
 func ListHealth(rows []*AddrModel) []*AddrModel {
 	// if targetUrl == "" {
 	// 	targetUrl = "https://www.baidu.com"
 	// }
-	targetUrl := "https://www.baidu.com"
+	// targetUrl := "https://www.baidu.com"
+	targetUrl := "https://httpbin.org/get"
 
 	type reporter struct {
 		report *CheckReport
@@ -109,5 +160,4 @@ func UpdateSourceWithCrawler() {
 	if err != nil {
 		fmt.Println(err)
 	}
-
 }
