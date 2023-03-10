@@ -1,170 +1,150 @@
 package pool
 
 import (
-	"encoding/json"
-	"io"
-	"math/rand"
-	"net/http"
+	"fmt"
 	"sync"
+	"time"
 
 	"github.com/robfig/cron/v3"
+
+	"autoproxy/log"
+	"autoproxy/pool/crawl"
 )
 
 type PoolApp struct {
-	addrslocker sync.RWMutex
-	addrs       []string
-
 	cronImp *cron.Cron
 
 	frashLock sync.Mutex
 	frashTask cron.EntryID
+
+	Source   Source
+	Checker  Check
+	Storager Storage
+	log      log.Logger
+
+	checkInterval time.Duration
 }
 
 func NewPoolApp() *PoolApp {
-	return &PoolApp{
-		cronImp: cron.New(),
+	app := &PoolApp{
+		cronImp:       cron.New(),
+		checkInterval: 10 * time.Minute,
+		Source: NewSrouceGroup(
+			crawl.NewCrawler(),
+		),
+		Checker:  NewRequestChecker("https://httpbin.org/get"),
+		Storager: NewFileStorager("proxies.json"),
+		log:      log.NewNoop(),
 	}
+	app.frashTask, _ = app.cronImp.AddFunc("*/10 * * * *", func() {
+		app.Frash()
+	})
+	return app
 }
 
-func (app *PoolApp) ServeMux() *http.ServeMux {
-	type RespType struct {
-		Code int         `json:"code"`
-		Msg  string      `json:"msg"`
-		Data interface{} `json:"data"`
-	}
-
-	doresp := func(w http.ResponseWriter, resp *RespType, err error) {
-		if err != nil {
-			resp.Code = -1
-			resp.Msg = err.Error()
-		}
-		data, err := json.Marshal(resp)
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte(err.Error()))
-			return
-		}
-		w.Write(data)
-	}
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("/randone", func(w http.ResponseWriter, r *http.Request) {
-		doresp(w, &RespType{
-			Data: app.RandOnde(),
-		}, nil)
-	})
-
-	mux.HandleFunc("/getall", func(w http.ResponseWriter, r *http.Request) {
-		doresp(w, &RespType{
-			Data: app.GetAll(),
-		}, nil)
-	})
-
-	mux.HandleFunc("/info", func(w http.ResponseWriter, r *http.Request) {
-		doresp(w, &RespType{
-			Data: app.GetAll(),
-		}, nil)
-	})
-
-	mux.HandleFunc("/frash", func(w http.ResponseWriter, r *http.Request) {
-		go app.Flash()
-		doresp(w, &RespType{Msg: "ok"}, nil)
-	})
-
-	mux.HandleFunc("/putin", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != "POST" {
-			w.WriteHeader(http.StatusMethodNotAllowed)
-			return
-		}
-
-		defer r.Body.Close()
-		_, err := io.ReadAll(r.Body)
-		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			w.Write([]byte(err.Error()))
-			return
-		}
-
-		//todo
-	})
-
-	return mux
-}
-
-func (app *PoolApp) Init() error {
+func (app *PoolApp) Run() error {
 	var err error
-	app.frashTask, err = app.cronImp.AddFunc("0 0/10 * * * ?", func() {
-		app.Flash()
-	})
-	app.Flash()
+	go func() {
+		for v := range app.Source.Reader() {
+			app.Putin([]string{v})
+		}
+	}()
+	go app.Frash()
+
+	app.cronImp.Run()
 	return err
 }
 
-func (app *PoolApp) GetAll() []string {
-	app.addrslocker.RLock()
-	defer app.addrslocker.RUnlock()
-	ret := app.addrs[:]
-	return ret
-}
-func (app *PoolApp) AddrCount() int {
-	app.addrslocker.RLock()
-	defer app.addrslocker.RUnlock()
-	return len(app.addrs)
+func (app *PoolApp) Stop() {
+	// better cannot stop during frash
+
+	app.frashLock.Lock()
+	defer app.frashLock.Unlock()
+
+	app.cronImp.Stop()
+	app.Source.Close()
+	app.Storager.Flash()
 }
 
-func (app *PoolApp) RandOnde() string {
-	app.addrslocker.RLock()
-	defer app.addrslocker.RUnlock()
-
-	cnt := len(app.addrs)
-	if cnt == 0 {
-		return ""
+func (app *PoolApp) GetAll() []*ProxyAddr {
+	result, err := app.Storager.GetAll()
+	if err != nil {
+		return []*ProxyAddr{}
 	}
-	i := rand.Int31n(int32(cnt))
-	return app.addrs[i]
+	return result
 }
 
-func (app *PoolApp) Flash() {
+func (app *PoolApp) Size() int {
+	return app.Storager.Count()
+}
+
+func (app *PoolApp) RandOnde() (*ProxyAddr, error) {
+	return app.Storager.RandOne()
+}
+
+func (app *PoolApp) Putin(addrstrs []string) {
+	addrs := make([]*ProxyAddr, 0, len(addrstrs))
+	for _, addrstr := range addrstrs {
+		addr, _ := app.Storager.Get(addrstr)
+		if addr != nil {
+			continue
+		}
+		var err error
+		addr, err = NewProxyAddrWithStr(addrstr)
+		if err != nil {
+			continue
+		}
+		addrs = append(addrs, addr)
+	}
+
+	for _, addr := range addrs {
+		go func(addr *ProxyAddr) {
+			fmt.Println("check", addr.Addr)
+			app.DoHealthCheck(addr)
+		}(addr)
+	}
+}
+
+func (app *PoolApp) DoHealthCheck(addr *ProxyAddr) {
+	app.Checker.HealthCheck(addr)
+	if addr.Health >= -1 {
+		app.AvailableAddr(addr)
+	} else {
+		app.UnavailableAddr(addr)
+	}
+}
+
+func (app *PoolApp) AvailableAddr(addr *ProxyAddr) {
+	app.Storager.Save(addr)
+}
+
+func (app *PoolApp) UnavailableAddr(addr *ProxyAddr) {
+	app.Storager.Delete(addr.Addr)
+}
+
+func (app *PoolApp) Frash() {
 	ok := app.frashLock.TryLock()
 	if !ok {
 		return
 	}
 	defer app.frashLock.Unlock()
 
-	// oldaddrs := app.GetAll()
-	// defer app.frashLock.Unlock()
+	addrs := app.GetAll()
+	needCheck := make([]*ProxyAddr, 0, len(addrs))
 
-	// cache := make(map[string]struct{})
-	// for _, addrstr := range oldaddrs {
-	// 	cache[addrstr] = struct{}{}
-	// }
-
-	// crawlResult := crawl.RunAllCrawlers()
-
-	// for _, item := range crawlResult {
-	// 	for _, addrstr := range item.Addrs {
-	// 		cache[addrstr] = struct{}{}
-	// 	}
-	// }
-
-	// addrs := make([]*ProxyAddr, 0, len(cache))
-	// for k := range cache {
-	// 	addr, err := NewProxyAddrFromStr(k)
-	// 	if err != nil {
-	// 		fmt.Println(err)
-	// 		continue
-	// 	}
-	// 	addrs = append(addrs, addr)
-	// }
-
-	// addrs = ListHealth2(addrs)
-
-	// newaddrs := make([]string, 0, len(addrs))
-	// for _, addr := range addrs {
-	// 	newaddrs = append(newaddrs, addr.Address())
-	// }
-
-	// app.addrslocker.Lock()
-	// defer app.addrslocker.Unlock()
-	// app.addrs = newaddrs
+	for _, addr := range addrs {
+		if time.Since(addr.CheckAt) > app.checkInterval {
+			needCheck = append(needCheck, addr)
+		}
+	}
+	wg := sync.WaitGroup{}
+	for _, addr := range needCheck {
+		wg.Add(1)
+		go func(addr *ProxyAddr) {
+			defer wg.Done()
+			app.DoHealthCheck(addr)
+		}(addr)
+	}
+	wg.Wait()
+	app.Storager.Flash()
 }

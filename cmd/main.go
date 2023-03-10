@@ -6,14 +6,10 @@ import (
 )
 
 func main() {
-	pool := pool.NewPoolApp()
-	// err := pool.Init()
-	// if err != nil {
-	// 	log.Error(err)
-	// 	return
-	// }
-	mux := pool.ServeMux()
+	app := pool.NewPoolApp()
+	defer app.Stop()
+	go app.Run()
 
-	// http.Handle("/pool/", mux)
-	http.ListenAndServe(":8088", mux)
+	pool.NewHttpHandler(app, http.DefaultServeMux)
+	http.ListenAndServe(":8088", nil)
 }

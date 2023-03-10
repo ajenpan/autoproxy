@@ -1,32 +1,62 @@
 package crawl
 
 import (
+	"fmt"
+	"log"
 	"time"
 )
 
-type Crawler interface {
-	Name() string
-	Work() (*CrawlResult, error)
+type Crawler struct {
+	que chan string
+
+	tk *time.Ticker
 }
 
-type CrawlResult struct {
-	CrawlerName string
-	Addrs       []string
-	CostTime    time.Duration
-	Err         error
-}
-
-var AllCrawlers = []Crawler{
-	&HensonGetter{},
-}
-
-func RunAllCrawlers() (ret []*CrawlResult) {
-	for _, crawler := range AllCrawlers {
-		result, err := crawler.Work()
-		if err != nil {
-			result.Err = err
+func NewCrawler() *Crawler {
+	ret := &Crawler{que: make(chan string, 100)}
+	ret.tk = time.NewTicker(time.Minute * 20)
+	go func() {
+		for {
+			ret.work()
+			<-ret.tk.C
 		}
-		ret = append(ret, result)
+	}()
+
+	return ret
+}
+
+func (c *Crawler) Reader() <-chan string {
+	return c.que
+}
+
+func (c *Crawler) Close() {
+	c.tk.Stop()
+	close(c.que)
+}
+
+func (c *Crawler) work() {
+	wrap := func(name string, f func() []string) {
+		defer func() {
+			if err := recover(); err != nil {
+				log.Println("crawl get error:", name, err)
+			}
+		}()
+		addrs := f()
+		if len(addrs) == 0 {
+			fmt.Println("crawl get empty:", name)
+		}
+		for _, addr := range addrs {
+			c.que <- addr
+		}
 	}
-	return
+
+	for name, task := range Task {
+		wrap(name, task)
+	}
+}
+
+var Task = make(map[string]func() []string)
+
+func RegTask(name string, task func() []string) {
+	Task[name] = task
 }
