@@ -39,6 +39,8 @@ func loadDoc(url string) (doc *html.Node, err error) {
 	return htmlquery.Parse(resp.Body)
 }
 
+// the follow code come from github.com/henson/proxypool
+
 func PZZQZ() (result []string) {
 	pollURL := "http://pzzqz.com/"
 	doc, err := loadDoc(pollURL)

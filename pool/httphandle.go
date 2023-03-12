@@ -2,6 +2,7 @@ package pool
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 )
@@ -45,6 +46,23 @@ func (h *HttpHandle) init(mux *http.ServeMux) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write(data)
 	}
+	readReq := func(r *http.Request, out interface{}) error {
+		if r.Method != "POST" {
+			return fmt.Errorf("method not allowed")
+		}
+
+		defer r.Body.Close()
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			return err
+		}
+
+		err = json.Unmarshal(raw, out)
+		if err != nil {
+			return err
+		}
+		return nil
+	}
 
 	mux.HandleFunc("/randone", func(w http.ResponseWriter, r *http.Request) {
 		one, err := h.App.RandOnde()
@@ -71,29 +89,35 @@ func (h *HttpHandle) init(mux *http.ServeMux) {
 	mux.HandleFunc("/size", func(w http.ResponseWriter, r *http.Request) {
 		doresp(w, &RespType{Data: h.App.Size()}, nil)
 	})
-
-	mux.HandleFunc("/putin", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != "POST" {
-			w.WriteHeader(http.StatusMethodNotAllowed)
-			return
-		}
-
-		defer r.Body.Close()
-		raw, err := io.ReadAll(r.Body)
+	mux.HandleFunc("/check", func(w http.ResponseWriter, r *http.Request) {
+		addrs := []string{}
+		err := readReq(r, &addrs)
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			w.Write([]byte(err.Error()))
 			return
 		}
-		addrs := []string{}
+		if len(addrs) > 0 {
+			go func() {
+				for _, addr := range addrs {
+					h.App.DoCheck(addr)
+				}
+			}()
+		}
+		doresp(w, &RespType{Msg: "checking"}, nil)
+	})
 
-		err = json.Unmarshal(raw, &addrs)
+	mux.HandleFunc("/putin", func(w http.ResponseWriter, r *http.Request) {
+		addrs := []string{}
+		err := readReq(r, &addrs)
 		if err != nil {
-			doresp(w, &RespType{}, err)
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte(err.Error()))
 			return
 		}
-
-		go h.App.Putin(addrs)
+		if len(addrs) > 0 {
+			go h.App.Putin(addrs)
+		}
 		doresp(w, &RespType{Msg: "ok"}, nil)
 	})
 }

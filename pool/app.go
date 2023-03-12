@@ -1,7 +1,6 @@
 package pool
 
 import (
-	"fmt"
 	"sync"
 	"time"
 
@@ -99,19 +98,30 @@ func (app *PoolApp) Putin(addrstrs []string) {
 
 	for _, addr := range addrs {
 		go func(addr *ProxyAddr) {
-			fmt.Println("check", addr.Addr)
 			app.DoHealthCheck(addr)
 		}(addr)
 	}
 }
 
 func (app *PoolApp) DoHealthCheck(addr *ProxyAddr) {
-	app.Checker.HealthCheck(addr)
-	if addr.Health >= -1 {
+	report := app.Checker.HealthCheck(addr)
+	if report.Extra != nil {
+		addr.Extra["report_extra"] = report.Extra
+	}
+	if addr.Health >= 0 {
 		app.AvailableAddr(addr)
 	} else {
 		app.UnavailableAddr(addr)
 	}
+}
+
+func (app *PoolApp) DoCheck(addrstr string) {
+	addr, _ := app.Storager.Get(addrstr)
+	if addr == nil {
+		return
+	}
+	app.Storager.Delete(addrstr)
+	app.DoHealthCheck(addr)
 }
 
 func (app *PoolApp) AvailableAddr(addr *ProxyAddr) {
@@ -131,12 +141,12 @@ func (app *PoolApp) Frash() {
 
 	addrs := app.GetAll()
 	needCheck := make([]*ProxyAddr, 0, len(addrs))
-
 	for _, addr := range addrs {
 		if time.Since(addr.CheckAt) > app.checkInterval {
 			needCheck = append(needCheck, addr)
 		}
 	}
+
 	wg := sync.WaitGroup{}
 	for _, addr := range needCheck {
 		wg.Add(1)

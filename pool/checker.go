@@ -22,8 +22,9 @@ func NewRequestChecker(url string) Check {
 	return &RequestChecker{
 		Method:    "GET",
 		TargetUrl: url,
-		Client:    &http.Client{},
-		MaxHealth: 3,
+		Client: &http.Client{
+			Timeout: 10 * time.Second,
+		},
 	}
 }
 
@@ -52,15 +53,20 @@ func (c *RequestChecker) HealthCheck(addr *ProxyAddr) *CheckReport {
 
 	c.Client.Transport = &http.Transport{
 		//ProxyConnectHeader: addr.Header,
-		Proxy:           http.ProxyURL(addr.URL()),
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		DisableKeepAlives:     true,
+		Proxy:                 http.ProxyURL(addr.URL()),
+		TLSClientConfig:       &tls.Config{InsecureSkipVerify: true},
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          100,
+		TLSHandshakeTimeout:   2 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
 	}
 
 	startAt := time.Now()
 	req, err := http.NewRequest(c.Method, c.TargetUrl, nil)
 
 	if err != nil {
-		addr.Health = addr.Health - 1
+		addr.Health = -1
 		report.Err = err
 		return report
 	}
@@ -68,7 +74,7 @@ func (c *RequestChecker) HealthCheck(addr *ProxyAddr) *CheckReport {
 	resp, err := c.Client.Do(req)
 
 	if err == nil && resp != nil && resp.StatusCode == 200 {
-		addr.Health = addr.Health + 1
+		addr.Health = 1
 
 		extra := &RequestCheckerExtra{
 			RespCode:   resp.StatusCode,
@@ -79,16 +85,8 @@ func (c *RequestChecker) HealthCheck(addr *ProxyAddr) *CheckReport {
 		report.Extra = extra
 
 	} else {
-		addr.Health = addr.Health - 1
+		addr.Health = -1
 		report.Err = err
-	}
-
-	if addr.Health > c.MaxHealth {
-		addr.Health = c.MaxHealth
-	}
-
-	if addr.Health < -c.MaxHealth {
-		addr.Health = -c.MaxHealth
 	}
 
 	addr.Speed = time.Since(startAt).String()
